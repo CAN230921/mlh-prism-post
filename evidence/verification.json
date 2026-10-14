@@ -1,0 +1,109 @@
+{
+  "verified_at_utc": "2026-10-14T16:49:59.924981+00:00",
+  "python": "3.14.7",
+  "tests_exit_code": 0,
+  "endings": {
+    "home": {
+      "route": [
+        "1",
+        "1",
+        "1",
+        "2",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1"
+      ],
+      "exit_code": 0,
+      "passed": true
+    },
+    "voices": {
+      "route": [
+        "1",
+        "1",
+        "1",
+        "2",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "2",
+        "2"
+      ],
+      "exit_code": 0,
+      "passed": true
+    },
+    "lone": {
+      "route": [
+        "1",
+        "1",
+        "1",
+        "2",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "3"
+      ],
+      "exit_code": 0,
+      "passed": true
+    },
+    "reunion": {
+      "route": [
+        "1",
+        "1",
+        "1",
+        "2",
+        "1",
+        "1",
+        "1",
+        "2",
+        "1",
+        "2",
+        "1",
+        "3",
+        "4"
+      ],
+      "exit_code": 0,
+      "passed": true
+    },
+    "darkness": {
+      "route": [
+        "1",
+        "1",
+        "1",
+        "2",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "5"
+      ],
+      "exit_code": 0,
+      "passed": true
+    }
+  },
+  "source_sha256": {
+    "game.py": "d5de65b3ac8bbada9726b45ae700a2d1a6b95bd8890e42bb47db3f76a722aa31",
+    "copilot_core.py": "646fdbd7ec9a28bd9e09e05f2e92297b2465e63a5a497b2f87524aaaab7de4cb",
+    "story.py": "35201696ec24e7e3713c7d1a418074450211c460e1d505492931117c399336bb",
+    "tests/test_game.py": "610747a35aa4c2ee3a966c75978f0f47530ec748c2d7e9aca299c7d646b44cd4",
+    "evidence/copilot_core_original.py": "9b14bf7c05c2149bfa2afc86045e85960f7f1cb14eb4a6bbc335d44609cb1bf6"
+  }
+}

@@ -1,0 +1,134 @@
+--- copilot_core_original.py
++++ copilot_core.py
+@@ -1,7 +1,8 @@
+ from dataclasses import dataclass, field
+-from typing import Dict, Set, List, Optional
++"""GitHub Copilot 生成的程序基础；Codex 修订详见 TOOL_USAGE.md。"""
++
++from typing import Dict, Set, List, Optional, Tuple
+ import copy
+-import sys
+ 
+ @dataclass
+ class State:
+@@ -43,9 +44,16 @@
+         return self.nodes[self.state.node]
+ 
+     def available(self) -> List[Choice]:
++        if self.state.ending is not None:
++            return []
+         node = self._get_node()
+         avail = []
+         for c in node.choices:
++            if not c.ending and c.target not in self.nodes:
++                continue
++            if (c.target == self.state.node and not any(c.costs.values())
++                    and not (c.give_flags - self.state.flags) and not c.ending):
++                continue
+             # 前置旗标
+             if not c.require_flags.issubset(self.state.flags):
+                 continue
+@@ -66,7 +74,9 @@
+         avail.sort(key=lambda x: x.key)
+         return avail
+ 
+-    def choose(self, key: str) -> (bool, str):
++    def choose(self, key: str) -> Tuple[bool, str]:
++        if self.state.ending is not None:
++            return False, "本局已经结束，请重玩。"
+         try:
+             node = self._get_node()
+         except KeyError as e:
+@@ -78,6 +88,8 @@
+                 break
+         if choice is None:
+             return False, "无效选择：该选项不存在。"
++        if not choice.ending and choice.target not in self.nodes:
++            return False, "选项定义错误：目标场景不存在。"
+ 
+         # 验证前置与资源
+         if not choice.require_flags.issubset(self.state.flags):
+@@ -128,9 +140,14 @@
+             parts.append(f"{name}-{v}")
+     return ", ".join(parts) if parts else "无消耗"
+ 
+-def run_cli(nodes: Dict[str, Node], endings: Dict[str, str]):
++def run_cli(nodes: Dict[str, Node], endings: Dict[str, str], flag_labels=None):
+     game = Game(nodes)
+-    print("欢迎来到《折光邮局》简易交互式冒险（中文 CLI）。输入 'help' 获取帮助。")
++    seen_endings = set()
++    flag_labels = flag_labels or {}
++    print("《折光邮局：最后一封信》\n中文科幻文字冒险 · 首次细读约 5–10 分钟 · 5 个结局")
++    print("输入编号选择；help 帮助，status 状态，restart 重开，quit 退出。")
++    print("阅读和帮助不耗时间；只有选择会扣除标明的资源。资源不能为负。")
++    last_node = None
+     while True:
+         try:
+             node = game._get_node()
+@@ -139,14 +156,16 @@
+             break
+ 
+         # 显示场景
+-        print("\n" + "="*40)
+-        print(f"{node.title}\n")
+-        print(node.text + "\n")
++        if last_node != game.state.node:
++            print("\n" + "="*40)
++            print(f"{node.title}\n")
++            print(node.text + "\n")
++            last_node = game.state.node
+         # 显示资源状态
+         s = game.state
+         print(f"资源 — 氧气: {s.oxygen}  电力: {s.power}  时间: {s.time}")
+         if s.flags:
+-            print("旗标:", ", ".join(sorted(s.flags)))
++            print("携带与记录:", "、".join(flag_labels.get(f, f) for f in sorted(s.flags)))
+         # 显示可选项
+         avail = game.available()
+         if not avail and s.ending is None:
+@@ -166,12 +185,16 @@
+         cmd = raw.lower()
+         if cmd in ("help", "h", "?"):
+             print("命令：输入选项键  | help 显示此帮助 | status 显示状态 | restart 重玩 | quit 退出")
++            print("花费以 [氧气-1, 电力-1, 时间-1] 标明。资源不足或缺少前置条件的选项不显示。")
++            print("不存在随机判定；日志、航图、乘员、记忆和接线决定最终选择。结局后 replay 可重玩。")
++            print("时间是行动余量，不是现实倒计时。仅在选择时扣除，读慢一些也不会失败。")
+             continue
+         if cmd in ("status",):
+             print(f"当前节点: {game.state.node}  资源: 氧气={s.oxygen} 电力={s.power} 时间={s.time}")
+             continue
+         if cmd in ("restart", "r"):
+             game.reset()
++            last_node = None
+             print("游戏已重置。")
+             continue
+         if cmd in ("quit", "q", "exit"):
+@@ -186,9 +209,15 @@
+         # 检查是否到达结局
+         if game.state.ending:
+             end_key = game.state.ending
++            seen_endings.add(end_key)
+             print("\n" + "-"*40)
+             print("结局：" + (end_key if end_key else "（未知结局）"))
+             print(endings.get(end_key, "（此结局暂无描述。）"))
++            if "seed" in game.state.flags:
++                print("\n【随身物】你口袋里的种子还在。无论信抵达哪里，那里都将多一种绿色。")
++            if "anonymous" in game.state.flags and "memory" in game.state.flags:
++                print("【记忆的代价】匿名压缩保存了内容，寄信人的名字却留在邮局。")
++            print(f"\n本次启动已发现结局：{len(seen_endings)}/{len(endings)}")
+             # 结局后选择重玩或退出
+             while True:
+                 try:
+@@ -196,10 +225,11 @@
+                 except (EOFError, KeyboardInterrupt):
+                     print("\n已退出。再见。")
+                     return
+-                if ans in ("replay", "r"):
++                if ans in ("replay", "restart", "r", "重玩"):
+                     game.reset()
++                    last_node = None
+                     break
+                 if ans in ("quit", "q"):
+                     print("已退出。再见。")
+                     return
+-                print("请输入 'replay' 或 'quit'。")+                print("请输入 'replay' 或 'quit'。")

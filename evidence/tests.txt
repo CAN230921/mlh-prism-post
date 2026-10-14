@@ -1,0 +1,25 @@
+test_actual_cli_reaches_all_five_endings (test_game.CLITests.test_actual_cli_reaches_all_five_endings) ... ok
+test_ctrl_c_exits_cleanly (test_game.CLITests.test_ctrl_c_exits_cleanly) ... ok
+test_end_menu_invalid_input_then_quit (test_game.CLITests.test_end_menu_invalid_input_then_quit) ... ok
+test_eof_exits_without_traceback (test_game.CLITests.test_eof_exits_without_traceback) ... ok
+test_help_status_invalid_input_and_quit (test_game.CLITests.test_help_status_invalid_input_and_quit) ... ok
+test_replay_tracks_two_endings (test_game.CLITests.test_replay_tracks_two_endings) ... ok
+test_restart_during_play (test_game.CLITests.test_restart_during_play) ... ok
+test_end_state_cannot_be_changed (test_game.EngineTests.test_end_state_cannot_be_changed) ... ok
+test_exact_cost_is_payable_and_not_negative (test_game.EngineTests.test_exact_cost_is_payable_and_not_negative) ... ok
+test_insufficient_resources_keeps_state (test_game.EngineTests.test_insufficient_resources_keeps_state) ... ok
+test_invalid_choice_keeps_state (test_game.EngineTests.test_invalid_choice_keeps_state) ... ok
+test_invalid_target_rejected_before_payment (test_game.EngineTests.test_invalid_target_rejected_before_payment) ... ok
+test_missing_flag_keeps_state (test_game.EngineTests.test_missing_flag_keeps_state) ... ok
+test_negative_cost_is_rejected (test_game.EngineTests.test_negative_cost_is_rejected) ... ok
+test_no_op_self_loop_not_presented (test_game.EngineTests.test_no_op_self_loop_not_presented) ... ok
+test_restart_resets_resources_flags_and_progress (test_game.EngineTests.test_restart_resets_resources_flags_and_progress) ... ok
+test_separate_games_do_not_share_flags (test_game.EngineTests.test_separate_games_do_not_share_flags) ... ok
+test_all_five_ending_routes (test_game.StoryTests.test_all_five_ending_routes) ... ok
+test_every_reachable_state_can_finish_and_preserves_resources (test_game.StoryTests.test_every_reachable_state_can_finish_and_preserves_resources) ... ok
+test_story_links_costs_flags_and_keys_are_valid (test_game.StoryTests.test_story_links_costs_flags_and_keys_are_valid) ... ok
+
+----------------------------------------------------------------------
+Ran 20 tests in 6.225s
+
+OK

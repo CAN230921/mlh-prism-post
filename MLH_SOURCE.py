@@ -1,0 +1,544 @@
+# 折光邮局：最后一封信 — MLH 提交用独立源码
+# GitHub Copilot 生成引擎/CLI 基础；Codex 完成剧情、修订与验证。
+# 标准库，无需额外依赖。保存为 MLH_SOURCE.py，运行 python3 MLH_SOURCE.py。
+
+from dataclasses import dataclass, field
+"""GitHub Copilot 生成的程序基础；Codex 修订详见 TOOL_USAGE.md。"""
+
+from typing import Dict, Set, List, Optional, Tuple
+import copy
+
+@dataclass
+class State:
+    oxygen: int = 12
+    power: int = 10
+    time: int = 14
+    flags: Set[str] = field(default_factory=set)
+    node: str = "start"
+    ending: Optional[str] = None
+
+@dataclass
+class Choice:
+    key: str
+    label: str
+    target: str
+    costs: Dict[str, int] = field(default_factory=dict)  # keys: 'oxygen','power','time'
+    require_flags: Set[str] = field(default_factory=set)
+    give_flags: Set[str] = field(default_factory=set)
+    ending: Optional[str] = None
+
+@dataclass
+class Node:
+    title: str
+    text: str
+    choices: List[Choice] = field(default_factory=list)
+
+class Game:
+    def __init__(self, nodes: Dict[str, Node], initial: Optional[State] = None):
+        self.nodes = nodes
+        self._initial_state = copy.deepcopy(initial) if initial is not None else State()
+        self.state = copy.deepcopy(self._initial_state)
+
+    def reset(self):
+        self.state = copy.deepcopy(self._initial_state)
+
+    def _get_node(self) -> Node:
+        if self.state.node not in self.nodes:
+            raise KeyError(f"当前节点 '{self.state.node}' 不存在。")
+        return self.nodes[self.state.node]
+
+    def available(self) -> List[Choice]:
+        if self.state.ending is not None:
+            return []
+        node = self._get_node()
+        avail = []
+        for c in node.choices:
+            if not c.ending and c.target not in self.nodes:
+                continue
+            if (c.target == self.state.node and not any(c.costs.values())
+                    and not (c.give_flags - self.state.flags) and not c.ending):
+                continue
+            # 前置旗标
+            if not c.require_flags.issubset(self.state.flags):
+                continue
+            # 成本是否可付
+            cost_o = c.costs.get("oxygen", 0)
+            cost_p = c.costs.get("power", 0)
+            cost_t = c.costs.get("time", 0)
+            if cost_o < 0 or cost_p < 0 or cost_t < 0:
+                continue  # 不接受负成本定义
+            if (self.state.oxygen - cost_o) < 0:
+                continue
+            if (self.state.power - cost_p) < 0:
+                continue
+            if (self.state.time - cost_t) < 0:
+                continue
+            avail.append(c)
+        # 按 key 排序以稳定展示
+        avail.sort(key=lambda x: x.key)
+        return avail
+
+    def choose(self, key: str) -> Tuple[bool, str]:
+        if self.state.ending is not None:
+            return False, "本局已经结束，请重玩。"
+        try:
+            node = self._get_node()
+        except KeyError as e:
+            return False, str(e)
+        choice = None
+        for c in node.choices:
+            if c.key == key:
+                choice = c
+                break
+        if choice is None:
+            return False, "无效选择：该选项不存在。"
+        if not choice.ending and choice.target not in self.nodes:
+            return False, "选项定义错误：目标场景不存在。"
+
+        # 验证前置与资源
+        if not choice.require_flags.issubset(self.state.flags):
+            return False, "无效选择：前置条件不满足。"
+        cost_o = choice.costs.get("oxygen", 0)
+        cost_p = choice.costs.get("power", 0)
+        cost_t = choice.costs.get("time", 0)
+        if cost_o < 0 or cost_p < 0 or cost_t < 0:
+            return False, "选项定义错误：成本不能为负数。"
+        if self.state.oxygen < cost_o or self.state.power < cost_p or self.state.time < cost_t:
+            return False, "资源不足，不能执行该选择。"
+
+        # 防止无副作用的自循环导致死循环：如果目标是当前节点且不会改变资源、旗标或结局，则拒绝
+        no_resource_change = (cost_o == 0 and cost_p == 0 and cost_t == 0)
+        gives_new_flag = len(choice.give_flags - self.state.flags) > 0
+        changes_node = (choice.target != self.state.node)
+        sets_ending = (choice.ending is not None)
+        if (not changes_node) and no_resource_change and (not gives_new_flag) and (not sets_ending):
+            return False, "此选择不会改变状态，已被视为无效以防止无限循环。"
+
+        # 扣除资源并应用效果，保证原子性（出错则回滚）
+        prev = copy.deepcopy(self.state)
+        try:
+            self.state.oxygen -= cost_o
+            self.state.power -= cost_p
+            self.state.time -= cost_t
+            # 再次确保不为负（防御）
+            if self.state.oxygen < 0 or self.state.power < 0 or self.state.time < 0:
+                self.state = prev
+                return False, "执行失败：资源不足（事务回滚）。"
+            # 设置旗标
+            self.state.flags = set(self.state.flags) | set(choice.give_flags)
+            # 跳转或结局
+            if choice.ending:
+                self.state.ending = choice.ending
+            self.state.node = choice.target
+            return True, f"已执行：{choice.label}"
+        except Exception as e:
+            self.state = prev
+            return False, f"执行时发生错误：{e}"
+
+def format_costs(costs: Dict[str, int]) -> str:
+    parts = []
+    for k in ("oxygen", "power", "time"):
+        v = costs.get(k, 0)
+        if v:
+            name = {"oxygen":"氧气","power":"电力","time":"时间"}[k]
+            parts.append(f"{name}-{v}")
+    return ", ".join(parts) if parts else "无消耗"
+
+def run_cli(nodes: Dict[str, Node], endings: Dict[str, str], flag_labels=None):
+    game = Game(nodes)
+    seen_endings = set()
+    flag_labels = flag_labels or {}
+    print("《折光邮局：最后一封信》\n中文科幻文字冒险 · 首次细读约 5–10 分钟 · 5 个结局")
+    print("输入编号选择；help 帮助，status 状态，restart 重开，quit 退出。")
+    print("阅读和帮助不耗时间；只有选择会扣除标明的资源。资源不能为负。")
+    last_node = None
+    while True:
+        try:
+            node = game._get_node()
+        except KeyError:
+            print("当前节点配置丢失，游戏结束。")
+            break
+
+        # 显示场景
+        if last_node != game.state.node:
+            print("\n" + "="*40)
+            print(f"{node.title}\n")
+            print(node.text + "\n")
+            last_node = game.state.node
+        # 显示资源状态
+        s = game.state
+        print(f"资源 — 氧气: {s.oxygen}  电力: {s.power}  时间: {s.time}")
+        if s.flags:
+            print("携带与记录:", "、".join(flag_labels.get(f, f) for f in sorted(s.flags)))
+        # 显示可选项
+        avail = game.available()
+        if not avail and s.ending is None:
+            print("没有可用选项，游戏无法继续。输入 'restart' 重玩或 'quit' 退出。")
+        else:
+            print("可选项：")
+            for c in avail:
+                print(f"  {c.key}) {c.label}  [{format_costs(c.costs)}]")
+        # 读取输入
+        try:
+            raw = input("\n请输入选项键或命令 (help): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n已退出。再见。")
+            return
+        if not raw:
+            continue
+        cmd = raw.lower()
+        if cmd in ("help", "h", "?"):
+            print("命令：输入选项键  | help 显示此帮助 | status 显示状态 | restart 重玩 | quit 退出")
+            print("花费以 [氧气-1, 电力-1, 时间-1] 标明。资源不足或缺少前置条件的选项不显示。")
+            print("不存在随机判定；日志、航图、乘员、记忆和接线决定最终选择。结局后 replay 可重玩。")
+            print("时间是行动余量，不是现实倒计时。仅在选择时扣除，读慢一些也不会失败。")
+            continue
+        if cmd in ("status",):
+            print(f"当前节点: {game.state.node}  资源: 氧气={s.oxygen} 电力={s.power} 时间={s.time}")
+            continue
+        if cmd in ("restart", "r"):
+            game.reset()
+            last_node = None
+            print("游戏已重置。")
+            continue
+        if cmd in ("quit", "q", "exit"):
+            print("已退出。再见。")
+            return
+
+        # 选择处理
+        ok, msg = game.choose(raw)
+        print(msg)
+        if not ok:
+            continue
+        # 检查是否到达结局
+        if game.state.ending:
+            end_key = game.state.ending
+            seen_endings.add(end_key)
+            print("\n" + "-"*40)
+            print("结局：" + (end_key if end_key else "（未知结局）"))
+            print(endings.get(end_key, "（此结局暂无描述。）"))
+            if "seed" in game.state.flags:
+                print("\n【随身物】你口袋里的种子还在。无论信抵达哪里，那里都将多一种绿色。")
+            if "anonymous" in game.state.flags and "memory" in game.state.flags:
+                print("【记忆的代价】匿名压缩保存了内容，寄信人的名字却留在邮局。")
+            print(f"\n本次启动已发现结局：{len(seen_endings)}/{len(endings)}")
+            # 结局后选择重玩或退出
+            while True:
+                try:
+                    ans = input("\n输入 'replay' 重新开始，或 'quit' 退出: ").strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    print("\n已退出。再见。")
+                    return
+                if ans in ("replay", "restart", "r", "重玩"):
+                    game.reset()
+                    last_node = None
+                    break
+                if ans in ("quit", "q"):
+                    print("已退出。再见。")
+                    return
+                print("请输入 'replay' 或 'quit'。")
+
+
+"""本次挑战新创作的剧情数据。没有读取或复用其他游戏项目。"""
+
+
+
+def choice(key, label, target, oxygen=0, power=0, time=0,
+           requires=(), gives=(), ending=None):
+    return Choice(str(key), label, target,
+                  {"oxygen": oxygen, "power": power, "time": time},
+                  set(requires), set(gives), ending)
+
+
+FLAG_LABELS = {
+    "map": "旧信道日志", "sealed": "封好的气密窗", "drone": "维修蜂同行",
+    "seed": "玻璃苔种子", "route": "安全离站航图", "memory": "最后一袋记忆信",
+    "anonymous": "匿名压缩", "crew": "苏醒的校准员", "witness": "乘员心跳记录",
+    "relay": "手工接通的中继", "vessel": "待发逃生艇", "transmitter": "待发广播塔",
+}
+
+NODES = {
+    "start": Node("01 / 值班表上的空白", """
+你在折光邮局的桌下醒来。最后一次撞击把杯子压成了月牙，杯底仍写着：
+“收到也好，退回也好，总要给人一个回音。”这不是你的字，是上一任值班员留下的。
+
+折光邮局绕着一颗没有居民的冰巨星运行。它不运送纸，替远行的人保存感官记忆：
+下雨前的土味、孩子第一次喊爸爸的声音、有人终于肯说出口的道歉。
+货船每年停靠一次。今年的货船没有来，反而是一场碎冰潮撞坏了电缆。
+
+广播里的机械声报出剩余储备：氧气十二格、电力十格、十四格行动时间。
+你是唯一醒着的人。邮局远端还有一座冷眠舱，一间信库，一艘逃生艇。
+下一轮冰潮抵达前，你得决定哪些东西应该离开这里。
+机械声补了一句：“阅读本身不耗资源。请慢慢想。”
+""".strip(), [choice(1, "戴好呼吸面罩，去查看事故记录", "antenna", time=1)]),
+
+    "antenna": Node("02 / 窗外的碎冰", """
+观测窗裂出一道白线，细小的冰粒沿着线跳动。桌上两盏指示灯争用同一根电线：
+一盏连着气密窗，另一盏连着事故终端。两件事都能做，但这里的备用接口只够启动一次。
+
+终端曾记录邮局附近的每条折光信道。知道它们的位置，离站时便不用摸黑试路；
+不过读取终端要用电。封住窗则能让维修通道保持气密，稍后通过那里会少耗一格氧气。
+封窗本身也得用掉一格。它不是凭空增加资源，而是把消耗挪到现在。
+
+你隔着裂窗看见一枚旧邮戳，在冰巨星的极光里漂着。几个月前，有人嫌它太老，
+让你扔掉。你没有扔。现在它比这座邮局更自由。
+机械声说：“日志能节省后面的行动，封窗能保护眼前的通路。我只能替你报账。”
+""".strip(), [
+        choice(1, "读取旧信道日志", "sorting", power=1, time=1, gives=("map",)),
+        choice(2, "封好气密窗", "sorting", oxygen=1, power=1, time=1, gives=("sealed",)),
+        choice(3, "两盏灯都关掉，保存资源", "sorting", time=1),
+    ]),
+
+    "sorting": Node("03 / 一封尚未写好的回信", """
+分拣台上有一封未署名的信。它没有收件人，只有一句话：
+“若这地方消失，至少告诉我，最后是谁关的灯。”
+
+你想起冷眠舱里那位校准员。她总在夜班时敲三下管壁，提醒你别睡过头。
+你们没有认真说过话；那三下敲击，却使每一个夜班都像两个人共同守着。
+信库里则有几千个人的夜晚。他们缴了邮费，不知道自己的信会成为最后一袋。
+
+机械声让你先写一句回信。它不把这句话当作命令，也不会因此锁住路线。
+真正决定结局的，是你接下来留下的资源和带走的东西。
+你拿起笔。笔尖在失重中悬了片刻，像在等你承认：没有一个答案能替所有人作答。
+""".strip(), [
+        choice(1, "写下“我先去看看还活着的人”", "transit"),
+        choice(2, "写下“我会让这些信有一次回音”", "transit"),
+        choice(3, "写下“我想活着把这件事说出来”", "transit"),
+    ]),
+
+    "transit": Node("04 / 两条走廊", """
+通往信库的两条走廊在这里分开。左边是狭窄的维修管道，右边是能看见星空的玻璃桥。
+玻璃桥外壁已经破损，通过时面罩要独立供氧。它走得快，但你将错过维修间。
+左边的管道曾被观测窗漏气影响；若已经封窗，现在便可以直接穿过。
+
+你听见左边传来规律的碰撞声。一只维修蜂被翻倒的工具柜压住了腿。
+它不是人，通常也没有人在意它在做什么。可邮局没有出过一次错分件，
+正是因为这些小机器每天夜里把轨道上的纸屑和螺丝一粒粒拾起来。
+
+玻璃桥另一端，种植舱的灯亮着绿光。你忽然想看一点活的东西。
+这不需要成为伟大的决定，只需要是一条走廊。
+""".strip(), [
+        choice(1, "通过封窗后的维修管道", "engineer", time=1, requires=("sealed",)),
+        choice(2, "戴面罩挤进维修管道", "engineer", oxygen=1, time=1),
+        choice(3, "走玻璃桥，直接前往种植舱", "garden", oxygen=2, time=1),
+    ]),
+
+    "engineer": Node("05 / 被压住的维修蜂", """
+维修蜂抬起仅剩能动的一条腿，指着工具柜上的电锁。它还能飞，只是锁扣卡住了。
+用一格电力打开锁，它就能跟着你。稍后的中继接线，它的细小焊头会派上用场；
+你也能自己接线，代价是多耗一些氧气。
+
+你蹲下来才发现，它的外壳上刻着一排极细的日期。每完成一次年度维护，它就在自己
+身上划一道。没有人检查这些记号；是它自己在记。
+机械声问：“要把它登记成乘员吗？”你不知道机器想不想要一张船票。
+维修蜂又指了指电锁，像在说，先解决这一件具体的事。
+
+你无法在这里找到更多电池。撞击后留下的空电池壳，只能装进废料袋。
+""".strip(), [
+        choice(1, "解开电锁，让维修蜂同行", "garden", power=1, time=1, gives=("drone",)),
+        choice(2, "记下它的位置，继续前进", "garden", time=1),
+    ]),
+
+    "garden": Node("06 / 一点绿色", """
+玻璃苔覆盖着种植舱的半面墙，枝端凝着小小的水珠。它们靠邮局余热生长，
+从来没见过地面，也没见过真正的风。大多数信写给有人的地方，只有这些植物，
+把空无一人的走廊当作了家。
+
+一枚成熟的种子挂在门边。伸手摘下它要让面罩靠近孢子雾，过滤器会多耗一格氧气。
+它不会帮助你启动任何设备，带着它也不会让坏的结局变成好的结局。
+但如果有人活着离开，或者某封信飞向另一座邮局，它也许会成为下一点绿色。
+
+机械声暂停了报数。你以为它出故障了，它却说：“我的维护手册没有园艺这一章。”
+你在这里站了一会儿。站着看，不扣账；真正伸手的时候，才算一次行动。
+""".strip(), [
+        choice(1, "取一枚玻璃苔种子", "dispatch", oxygen=1, time=1, gives=("seed",)),
+        choice(2, "把绿色留在这里", "dispatch", time=1),
+    ]),
+
+    "dispatch": Node("07 / 找一条不撞冰的路", """
+调度台上所有航线都变成了红色。逃生艇能自己起飞，却认不出被冰潮扭曲的旧信道。
+要带上另一位乘员，你得先找到一条足够稳定的离站路线；独自离开时，艇上的
+单人保护模式可以让你硬闯出去，但那条路不适合刚从冷眠中醒来的人。
+
+如果带来了旧日志，可以用一次低功率扫描确认航道。没有日志，你也能用纸图逐段
+比对窗外的闪光，只是得去漏气的观察台，面罩需要额外供氧。
+还有第三种选择：把希望交给广播，暂时不为逃生艇校准路线。
+
+纸图边缘有人画了一只鸟。你从来没在太空里看见过鸟，却在很多寄来的记忆里听过。
+它们会在复杂的风里认路。你现在只能用手指，沿着纸上的线，慢慢找到出口。
+""".strip(), [
+        choice(1, "用旧日志扫描安全航道", "archive", power=1, time=1,
+               requires=("map",), gives=("route",)),
+        choice(2, "去观察台，用纸图手工校准", "archive", oxygen=1, time=2, gives=("route",)),
+        choice(3, "保留资源，不校准离站路线", "archive", time=1),
+    ]),
+
+    "archive": Node("08 / 最后一袋信", """
+信库里没有整齐的信封。几千段记忆悬在磁晶格中，像一片迟到的星空。
+你摸到其中一格，听见有人在厨房里说：“盐放多了。”然后两个人一起笑。
+这段记忆没有历史价值，却曾让一个漂在木星外的人哭了很久。
+
+搬走完整的记忆袋，要两格电力保存寄信人与收信人的名字。若改用匿名压缩，
+一格电力就够了，内容仍在，名字却只能留在这里。广播和同时救人与寄信，
+都至少需要一份记忆袋；单纯撤离不需要它。
+
+你在匿名键旁看见一张纸条：不要替别人决定他们愿不愿意被忘记。
+机械声说：“可我们现在连问他们的时间都没有。”
+它说完便安静下来，等你把手放在哪一个键上。
+""".strip(), [
+        choice(1, "保留完整姓名与记忆", "cryo", power=2, time=1, gives=("memory",)),
+        choice(2, "匿名压缩，只保存记忆内容", "cryo", power=1, time=1,
+               gives=("memory", "anonymous")),
+        choice(3, "让信库维持原样，继续去冷眠舱", "cryo", time=1),
+    ]),
+
+    "cryo": Node("09 / 那三下敲击", """
+冷眠舱上写着校准员的名字：闻芷。不是你想象中的“另一位值班员”，而是一个
+真实的、睡着的人。舱内仍有微弱心跳。唤醒她要一格电力，面罩与扶她走出舱的
+过程会再用两格氧气。她能一起离开，但前提是有安全航图和启动好的逃生艇。
+
+舱外贴着她的私人便条：“别为了叫醒我，把你自己的回家路关掉。”
+你不能知道她现在是否仍同意这句话。你可以照做，也可以不照做。
+若资源不够，至少可以记录她的心跳，把她确实还活过这一刻的消息带出去。
+
+你敲了三下舱盖。隔了很久，里面传来一下轻轻的回应。
+机械声没有替你解释那一下是什么意思。这一回，它也不知道。
+""".strip(), [
+        choice(1, "唤醒闻芷，让她跟你走", "ballast", oxygen=2, power=1, time=1, gives=("crew",)),
+        choice(2, "记录心跳，保留冷眠供电", "ballast", time=1, gives=("witness",)),
+        choice(3, "不碰冷眠设备，立即离开", "ballast", time=1),
+    ]),
+
+    "ballast": Node("10 / 不肯自动接通的线", """
+广播塔的中继被一块冰楔压断，自动修复程序已经重启了七次。
+第八次也不会成功。要广播记忆，或者同时带人和信离开，你必须让这根线重新接通。
+有维修蜂同行，就用它的焊头耗一格电力修复；否则，你得钻进漏气的夹层，
+用手工卡扣接线，花一格氧气。两种办法都要一格行动时间。
+
+线旁有一本纸质维护册，里面写着一句奇怪的话：所有自动系统，最后都依赖
+某个人愿意蹲下来。你以前嫌这句话过于感伤。现在你确实得蹲下来。
+
+即便接好中继，广播仍要另外启动。修好一根线不能代替最后的决定。
+你也可以绕过这里，将剩余资源留给逃生艇。机械声终于停止重启，
+像一位终于肯承认自己修不好的同事。
+""".strip(), [
+        choice(1, "请维修蜂焊接中继", "storm", power=1, time=1,
+               requires=("drone",), gives=("relay",)),
+        choice(2, "钻进夹层，手工接线", "storm", oxygen=1, time=1, gives=("relay",)),
+        choice(3, "绕过中继，把资源留给逃生艇", "storm", time=1),
+    ]),
+
+    "storm": Node("11 / 冰潮的前沿", """
+第二轮冰潮来了。邮局外壳发出一声很低的响动，像有人在很远的地方关上铁门。
+通往控制室的最后一段桥被碎冰遮住。若已有航图，可以沿地图标出的背风侧穿过去。
+否则要么点亮切割光束，把冰块推开；要么绕行更长的外侧步道。
+
+机械声问你，还记不记得上一封亲手寄出的信。你记得，是一段普通的海浪。
+寄信的人说他已经二十年没回过家，你把浪声调低一点，好让他能在睡前听。
+他后来有没有回去，你一直不知道。
+
+这座邮局不保证有人收到。它只保证，在能寄的时候把信寄出去。
+现在你站在冰潮里，忽然理解了那个保证有多小，又有多难。
+路线和资源已经记录在状态里；你可以输入 status，再做这一次选择。
+""".strip(), [
+        choice(1, "沿航图走背风侧", "control", oxygen=1, time=1, requires=("route",)),
+        choice(2, "点亮切割光束，穿过碎冰", "control", power=2, time=1),
+        choice(3, "绕行外侧步道", "control", oxygen=2, time=2),
+    ]),
+
+    "control": Node("12 / 同一个插口", """
+控制室只剩一个完好的启动插口。逃生艇和广播塔各有独立电容，启动其中一个
+只花一格电力；一旦准备好，设备便会等待你的最后指令。
+你也可以用修复过的中继串联它们，花两格电力，同时准备两套设备。
+串联不等于成功：最后同时救人与寄信，仍需要三格电力、两格氧气和一格时间。
+
+你计算着：救人要安全航图、醒着的闻芷与逃生艇；广播要记忆袋、中继与广播塔；
+独自撤离只需要逃生艇。把所有东西都带走，得把这些条件全部凑齐。
+屏幕上的数字不会因为你希望它们大一点而改变。
+
+你把最初那张未署名的信放在操作台旁。还差一个署名。
+机械声说：“无论你选什么，请让我把执行结果读完。”
+""".strip(), [
+        choice(1, "预热逃生艇", "finale", power=1, time=1, gives=("vessel",)),
+        choice(2, "预热广播塔", "finale", power=1, time=1, gives=("transmitter",)),
+        choice(3, "通过中继，同时预热两套设备", "finale", power=2, time=1,
+               requires=("relay",), gives=("vessel", "transmitter")),
+    ]),
+
+    "finale": Node("13 / 署名", """
+最后一次确认，没有回退键。你拿起那支笔，在信的结尾写下“最后的值班员”。
+你仍不知道它要寄给谁，也许是下一艘路过的货船，也许是许多年后发现残骸的人。
+也许没有人。但署名使这张纸变成了你愿意承担的一件事。
+
+可执行的指令已经列在下面。缺少设备、乘员、记忆、航图或资源的指令不会显示。
+如果某个选项没有出现，重玩时可以改动前面的选择，不必猜随机数。
+现在你还能读一遍状态，或输入 help 想一想规则；这些操作都不扣资源。
+
+机械声把广播音量调到了最低。它第一次没有说“请立即行动”。
+你听见的只是邮局的风扇，以及面罩里自己的呼吸。
+""".strip(), [
+        choice(1, "带闻芷登艇，把未寄出的信留在这里", "finale", oxygen=2, power=1, time=1,
+               requires=("crew", "route", "vessel"), ending="home"),
+        choice(2, "留在控制室，把最后一袋信广播出去", "finale", oxygen=1, power=2, time=1,
+               requires=("memory", "relay", "transmitter"), ending="voices"),
+        choice(3, "切入单人保护模式，独自撤离", "finale", oxygen=1, time=1,
+               requires=("vessel",), ending="lone"),
+        choice(4, "同步广播与发射，带闻芷和记忆一起走", "finale", oxygen=2, power=3, time=1,
+               requires=("crew", "route", "vessel", "memory", "relay", "transmitter"), ending="reunion"),
+        choice(5, "让设备继续等待，陪邮局走到停电", "finale", ending="darkness"),
+    ]),
+}
+
+ENDINGS = {
+    "home": """【归航的人】
+逃生艇松开缆绳时，闻芷握住你的手腕，替你把另一只手从发抖的启动键上挪开。
+她问邮局里的信怎么办。你说，没有寄出去。她没有立刻安慰你，只点了点头。
+三个月后，你们在补给港租了一个小柜台。柜台上没有记忆读取器，只有纸和笔。
+第一位来客问：“这里能寄到很远的地方吗？”闻芷说：“现在还不能。”
+你在她后面加了一句：“但我们可以先替你收着。”
+有人回来了。那些没能寄出的信，仍是你们需要记得的事。""",
+    "voices": """【群星回音】
+广播电容放电，几千段记忆沿着折光信道飞散。厨房里的笑声、海浪、道歉，
+第一次经过同一座天线。邮局停止转动，你在控制室里听完了最后一段录音。
+很久以后，一艘矿船收到了一秒钟的雨声。船长以为是通信故障，关掉又重新打开。
+她听了第三遍，才想起小时候放学时踩过的水洼。她把那一秒钟存了下来。
+没有人知道最后是谁关的灯。但有人确实收到了回音。
+你留在邮局。信离开了。""",
+    "lone": """【空椅子】
+单人保护模式把逃生艇猛推向信道。你醒来时，旁边的座椅空着，窗外已没有邮局。
+艇上自动问卷只有一个问题：“乘员是否安全？”你选了是。
+在补给港，你写下撞击的经过、冷眠舱的位置和最后的储备数字，把记录交给搜救站。
+搜救员没有问你为什么独自回来，只让你把能记住的细节再说一遍。
+那天晚上，有人敲了三下你的房门。你打开门，是送饭的服务员。
+活下来让故事有了讲述的人。它没有替你消除那张空椅子。""",
+    "reunion": """【下一座邮局】
+广播先亮，逃生艇随后解缆。最后一袋记忆在信道里展开，你和闻芷沿着航图穿过冰潮。
+机械声读完执行结果：“乘员二。记忆已寄出。折光邮局，今日营业结束。”
+补给港里，闻芷给那张未署名的信盖了一枚手刻邮戳，收件人写成“下一座邮局”。
+你们没有立刻建成什么。第一周只是找房，第二周才修好旧柜台。
+有天，一位路过的矿工问能不能寄一秒钟的雨声。你说可以，至少会尽力送出去。
+这一次，柜台后面有两个人。""",
+    "darkness": """【值班到最后】
+你没有下达指令。电容慢慢放空，风扇停止，玻璃苔的绿光在走廊尽头暗下去。
+机械声用最后一点电力读出值班日志：“最后的值班员，没有离岗。”
+冰潮把邮局推离旧轨道。那张有署名的信留在操作台上，旁边是没有盖下去的邮戳。
+等待也是一种选择。只是这一回，它没有替任何人等来货船。
+如果还想给这封信一个不同的去处，输入 replay，重新从值班表上的空白开始。""",
+}
+
+
+#!/usr/bin/env python3
+"""《折光邮局：最后一封信》入口。只依赖 Python 标准库。"""
+
+import argparse
+
+
+def main():
+    parser = argparse.ArgumentParser(description="中文科幻文字冒险《折光邮局：最后一封信》")
+    parser.add_argument("--version", action="version", version="折光邮局 1.0")
+    parser.parse_args()
+    run_cli(NODES, ENDINGS, FLAG_LABELS)
+
+
+if __name__ == "__main__":
+    main()
